@@ -98,8 +98,6 @@ def get_fundamentals(ticker_symbol):
     cash = balance_sheet.loc["Cash And Cash Equivalents"].iloc[0]
     ebitda = financials.loc["EBITDA"].iloc[0]
 
-    # Bring debt/cash/ebitda/equity into the same currency as market_cap
-    # (INR) before combining them in any formula.
     total_debt_inr = convert_to_inr(total_debt, actual_currency)
     cash_inr = convert_to_inr(cash, actual_currency)
     ebitda_inr = convert_to_inr(ebitda, actual_currency)
@@ -125,19 +123,105 @@ def get_fundamentals(ticker_symbol):
     }
 
 
-if __name__ == "__main__":
-    tickers = ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS"]
+def get_historical_growth_rates(ticker_symbol):
+    """
+    Calculates year-over-year revenue growth rates from the available
+    historical data (usually 4 years -> 3 growth rates).
+    Returns them sorted, plus bear/base/bull picks:
+      bear = lowest (most conservative) growth rate
+      bull = highest growth rate
+      base = the middle value
+    """
+    stock = yf.Ticker(ticker_symbol)
+    financials = stock.financials
+    revenue_row = financials.loc["Total Revenue"]
 
-    for ticker in tickers:
-        data = get_fundamentals(ticker)
-        flag = "  [auto-corrected]" if data["currency_overridden"] else ""
-        print(f"\n{data['ticker']} ({data['currency']}{flag})")
-        print(f"  Revenue: {data['revenue']:,.0f}")
-        print(f"  EBITDA: {data['ebitda']:,.0f}")
-        print(f"  Net Income: {data['net_income']:,.0f}")
-        print(f"  EPS: {data['eps']}")
-        print(f"  ROE: {data['roe']}")
-        print(f"  Debt/Equity: {data['debt_to_equity']:.3f}")
-        print(f"  P/E: {data['pe_ratio']}")
-        print(f"  EV/EBITDA: {data['ev_to_ebitda']:.2f}")
-        print(f"  Profit Margin: {data['profit_margin']}")
+    # revenue_row is ordered newest -> oldest; reverse it to oldest -> newest
+    revenues = revenue_row.iloc[::-1].tolist()
+
+    growth_rates = []
+    for i in range(1, len(revenues)):
+        previous = revenues[i - 1]
+        current = revenues[i]
+        growth = (current - previous) / previous
+        growth_rates.append(growth)
+
+    sorted_rates = sorted(growth_rates)
+
+    return {
+        "all_growth_rates": growth_rates,
+        "bear": sorted_rates[0],
+        "base": sorted_rates[len(sorted_rates) // 2],
+        "bull": sorted_rates[-1]
+    }
+
+
+def calculate_dcf(ticker_symbol, growth_rate, wacc=0.12, terminal_growth=0.04, projection_years=5):
+    """
+    Runs a single-scenario DCF valuation for one company.
+
+    growth_rate: assumed annual FCFF growth for the projection period (e.g. 0.0599 for 5.99%)
+    wacc: discount rate (Weighted Average Cost of Capital)
+    terminal_growth: assumed perpetual growth rate after the projection period
+    projection_years: how many years to explicitly project (default 5)
+    """
+    stock = yf.Ticker(ticker_symbol)
+    balance_sheet = stock.balance_sheet
+    financials = stock.financials
+
+    fcff_result = calculate_fcff(ticker_symbol)
+    fcff_year_0 = fcff_result["fcff"]
+    currency = fcff_result["currency"]
+
+    total_debt = convert_to_inr(balance_sheet.loc["Total Debt"].iloc[0], currency)
+    cash = convert_to_inr(balance_sheet.loc["Cash And Cash Equivalents"].iloc[0], currency)
+    shares_outstanding = financials.loc["Diluted Average Shares"].iloc[0]
+
+    # Project FCFF forward and discount each year back to today
+    pv_of_explicit_fcff = 0
+    fcff_current = fcff_year_0
+
+    for year in range(1, projection_years + 1):
+        fcff_current = fcff_current * (1 + growth_rate)
+        discount_factor = (1 + wacc) ** year
+        pv_of_explicit_fcff += fcff_current / discount_factor
+
+    # Terminal value, calculated at the end of the projection period, then discounted back
+    fcff_year_after_projection = fcff_current * (1 + terminal_growth)
+    terminal_value = fcff_year_after_projection / (wacc - terminal_growth)
+    pv_of_terminal_value = terminal_value / ((1 + wacc) ** projection_years)
+
+    enterprise_value = pv_of_explicit_fcff + pv_of_terminal_value
+    equity_value = enterprise_value - total_debt + cash
+    intrinsic_value_per_share = equity_value / shares_outstanding
+
+    return {
+        "ticker": ticker_symbol,
+        "growth_rate": growth_rate,
+        "wacc": wacc,
+        "terminal_growth": terminal_growth,
+        "pv_of_explicit_fcff": pv_of_explicit_fcff,
+        "pv_of_terminal_value": pv_of_terminal_value,
+        "enterprise_value": enterprise_value,
+        "equity_value": equity_value,
+        "intrinsic_value_per_share": intrinsic_value_per_share
+    }
+
+
+if __name__ == "__main__":
+    ticker = "TCS.NS"
+
+    growth_rates = get_historical_growth_rates(ticker)
+    print(f"Historical growth rates for {ticker}:")
+    print(f"  Bear: {growth_rates['bear']:.4f}")
+    print(f"  Base: {growth_rates['base']:.4f}")
+    print(f"  Bull: {growth_rates['bull']:.4f}")
+
+    result = calculate_dcf(ticker, growth_rate=growth_rates["base"])
+
+    print(f"\nDCF result for {ticker} (Base Case):")
+    print(f"  PV of explicit FCFF: {result['pv_of_explicit_fcff']:,.0f}")
+    print(f"  PV of terminal value: {result['pv_of_terminal_value']:,.0f}")
+    print(f"  Enterprise Value: {result['enterprise_value']:,.0f}")
+    print(f"  Equity Value: {result['equity_value']:,.0f}")
+    print(f"  Intrinsic Value per Share: ₹{result['intrinsic_value_per_share']:,.2f}")
