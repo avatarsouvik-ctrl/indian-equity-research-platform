@@ -217,11 +217,7 @@ if __name__ == "__main__":
     print(f"  Base: {growth_rates['base']:.4f}")
     print(f"  Bull: {growth_rates['bull']:.4f}")
 
-    result = calculate_dcf(ticker, growth_rate=growth_rates["base"])
-
-    print(f"\nDCF result for {ticker} (Base Case):")
-    print(f"  PV of explicit FCFF: {result['pv_of_explicit_fcff']:,.0f}")
-    print(f"  PV of terminal value: {result['pv_of_terminal_value']:,.0f}")
-    print(f"  Enterprise Value: {result['enterprise_value']:,.0f}")
-    print(f"  Equity Value: {result['equity_value']:,.0f}")
-    print(f"  Intrinsic Value per Share: ₹{result['intrinsic_value_per_share']:,.2f}")
+    print(f"\nDCF Scenarios for {ticker}:")
+    for scenario in ["bear", "base", "bull"]:
+        result = calculate_dcf(ticker, growth_rate=growth_rates[scenario])
+        print(f"  {scenario.capitalize()}: ₹{result['intrinsic_value_per_share']:,.2f} per share")
