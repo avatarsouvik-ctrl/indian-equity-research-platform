@@ -8,7 +8,16 @@ from fundamentals import calculate_fcff, get_fundamentals, get_historical_growth
 
 st.title("Indian Equity Research & Valuation Platform")
 
-ticker = "TCS.NS"
+companies = {
+    "TCS": "TCS.NS",
+    "Infosys": "INFY.NS",
+    "HCLTech": "HCLTECH.NS",
+    "Wipro": "WIPRO.NS",
+    "Tech Mahindra": "TECHM.NS"
+}
+
+selected_company = st.selectbox("Select a company", list(companies.keys()))
+ticker = companies[selected_company]
 
 st.header(f"{ticker}")
 

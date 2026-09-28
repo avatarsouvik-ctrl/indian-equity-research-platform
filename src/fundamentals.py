@@ -1,4 +1,5 @@
 import yfinance as yf
+import math
 
 def get_usd_to_inr_rate():
     fx = yf.Ticker("USDINR=X")
@@ -126,17 +127,17 @@ def get_fundamentals(ticker_symbol):
 def get_historical_growth_rates(ticker_symbol):
     """
     Calculates year-over-year revenue growth rates from the available
-    historical data (usually 4 years -> 3 growth rates).
-    Returns them sorted, plus bear/base/bull picks:
-      bear = lowest (most conservative) growth rate
-      bull = highest growth rate
-      base = the middle value
+    historical data. Some companies have missing (NaN) revenue for
+    their oldest available year, which would produce an invalid NaN
+    growth rate -- we filter those out before picking bear/base/bull.
+      bear = lowest (most conservative) valid growth rate
+      bull = highest valid growth rate
+      base = the middle valid value
     """
     stock = yf.Ticker(ticker_symbol)
     financials = stock.financials
     revenue_row = financials.loc["Total Revenue"]
 
-    # revenue_row is ordered newest -> oldest; reverse it to oldest -> newest
     revenues = revenue_row.iloc[::-1].tolist()
 
     growth_rates = []
@@ -146,7 +147,8 @@ def get_historical_growth_rates(ticker_symbol):
         growth = (current - previous) / previous
         growth_rates.append(growth)
 
-    sorted_rates = sorted(growth_rates)
+    valid_rates = [rate for rate in growth_rates if not math.isnan(rate)]
+    sorted_rates = sorted(valid_rates)
 
     return {
         "all_growth_rates": growth_rates,
@@ -170,14 +172,13 @@ def calculate_dcf(ticker_symbol, growth_rate, wacc=0.12, terminal_growth=0.04, p
     financials = stock.financials
 
     fcff_result = calculate_fcff(ticker_symbol)
-    fcff_year_0 = fcff_result["fcff"]
+    fcff_year_0 = convert_to_inr(fcff_result["fcff"], fcff_result["currency"])
     currency = fcff_result["currency"]
 
     total_debt = convert_to_inr(balance_sheet.loc["Total Debt"].iloc[0], currency)
     cash = convert_to_inr(balance_sheet.loc["Cash And Cash Equivalents"].iloc[0], currency)
     shares_outstanding = financials.loc["Diluted Average Shares"].iloc[0]
 
-    # Project FCFF forward and discount each year back to today
     pv_of_explicit_fcff = 0
     fcff_current = fcff_year_0
 
@@ -186,7 +187,6 @@ def calculate_dcf(ticker_symbol, growth_rate, wacc=0.12, terminal_growth=0.04, p
         discount_factor = (1 + wacc) ** year
         pv_of_explicit_fcff += fcff_current / discount_factor
 
-    # Terminal value, calculated at the end of the projection period, then discounted back
     fcff_year_after_projection = fcff_current * (1 + terminal_growth)
     terminal_value = fcff_year_after_projection / (wacc - terminal_growth)
     pv_of_terminal_value = terminal_value / ((1 + wacc) ** projection_years)
@@ -209,7 +209,7 @@ def calculate_dcf(ticker_symbol, growth_rate, wacc=0.12, terminal_growth=0.04, p
 
 
 if __name__ == "__main__":
-    ticker = "TCS.NS"
+    ticker = "INFY.NS"
 
     growth_rates = get_historical_growth_rates(ticker)
     print(f"Historical growth rates for {ticker}:")
