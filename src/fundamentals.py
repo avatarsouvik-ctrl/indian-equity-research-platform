@@ -158,29 +158,40 @@ def get_historical_growth_rates(ticker_symbol):
     }
 
 
-def calculate_dcf(ticker_symbol, growth_rate, wacc=0.12, terminal_growth=0.04, projection_years=5):
+def get_dcf_inputs(ticker_symbol):
     """
-    Runs a single-scenario DCF valuation for one company.
-
-    growth_rate: assumed annual FCFF growth for the projection period (e.g. 0.0599 for 5.99%)
-    wacc: discount rate (Weighted Average Cost of Capital)
-    terminal_growth: assumed perpetual growth rate after the projection period
-    projection_years: how many years to explicitly project (default 5)
+    Fetches everything a DCF needs from the data source, ONCE, and
+    puts it all in INR. No assumptions are applied here.
     """
     stock = yf.Ticker(ticker_symbol)
     balance_sheet = stock.balance_sheet
     financials = stock.financials
 
     fcff_result = calculate_fcff(ticker_symbol)
-    fcff_year_0 = convert_to_inr(fcff_result["fcff"], fcff_result["currency"])
     currency = fcff_result["currency"]
 
-    total_debt = convert_to_inr(balance_sheet.loc["Total Debt"].iloc[0], currency)
-    cash = convert_to_inr(balance_sheet.loc["Cash And Cash Equivalents"].iloc[0], currency)
-    shares_outstanding = financials.loc["Diluted Average Shares"].iloc[0]
+    return {
+        "ticker": ticker_symbol,
+        "currency": currency,
+        "fcff_year_0": convert_to_inr(fcff_result["fcff"], currency),
+        "total_debt": convert_to_inr(balance_sheet.loc["Total Debt"].iloc[0], currency),
+        "cash": convert_to_inr(balance_sheet.loc["Cash And Cash Equivalents"].iloc[0], currency),
+        "shares_outstanding": financials.loc["Diluted Average Shares"].iloc[0],
+    }
+
+
+def run_dcf_math(inputs, growth_rate, wacc, terminal_growth, projection_years=5):
+    """
+    Pure calculation: no downloading. Takes the inputs from
+    get_dcf_inputs() plus the assumptions, and returns the valuation.
+    Returns None if the assumptions are mathematically invalid
+    (WACC must be greater than terminal growth).
+    """
+    if wacc <= terminal_growth:
+        return None
 
     pv_of_explicit_fcff = 0
-    fcff_current = fcff_year_0
+    fcff_current = inputs["fcff_year_0"]
 
     for year in range(1, projection_years + 1):
         fcff_current = fcff_current * (1 + growth_rate)
@@ -192,11 +203,10 @@ def calculate_dcf(ticker_symbol, growth_rate, wacc=0.12, terminal_growth=0.04, p
     pv_of_terminal_value = terminal_value / ((1 + wacc) ** projection_years)
 
     enterprise_value = pv_of_explicit_fcff + pv_of_terminal_value
-    equity_value = enterprise_value - total_debt + cash
-    intrinsic_value_per_share = equity_value / shares_outstanding
+    equity_value = enterprise_value - inputs["total_debt"] + inputs["cash"]
+    intrinsic_value_per_share = equity_value / inputs["shares_outstanding"]
 
     return {
-        "ticker": ticker_symbol,
         "growth_rate": growth_rate,
         "wacc": wacc,
         "terminal_growth": terminal_growth,
@@ -208,16 +218,48 @@ def calculate_dcf(ticker_symbol, growth_rate, wacc=0.12, terminal_growth=0.04, p
     }
 
 
+def build_sensitivity_grid(inputs, growth_rate, wacc_values, terminal_growth_values, projection_years=5):
+    """
+    Runs the DCF for every WACC x terminal-growth combination.
+    Returns a list of rows (one per WACC), each row a list of
+    intrinsic values per share (one per terminal growth value).
+    A cell is None if that combination is invalid.
+    """
+    grid = []
+    for wacc in wacc_values:
+        row = []
+        for terminal_growth in terminal_growth_values:
+            result = run_dcf_math(inputs, growth_rate, wacc, terminal_growth, projection_years)
+            row.append(None if result is None else result["intrinsic_value_per_share"])
+        grid.append(row)
+    return grid
+
+
+def calculate_dcf(ticker_symbol, growth_rate, wacc=0.12, terminal_growth=0.04, projection_years=5):
+    """
+    Convenience wrapper: fetch inputs, then run the math once.
+    """
+    inputs = get_dcf_inputs(ticker_symbol)
+    result = run_dcf_math(inputs, growth_rate, wacc, terminal_growth, projection_years)
+    result["ticker"] = ticker_symbol
+    return result
+
+
 if __name__ == "__main__":
-    ticker = "INFY.NS"
+    ticker = "TCS.NS"
 
+    inputs = get_dcf_inputs(ticker)
     growth_rates = get_historical_growth_rates(ticker)
-    print(f"Historical growth rates for {ticker}:")
-    print(f"  Bear: {growth_rates['bear']:.4f}")
-    print(f"  Base: {growth_rates['base']:.4f}")
-    print(f"  Bull: {growth_rates['bull']:.4f}")
 
-    print(f"\nDCF Scenarios for {ticker}:")
-    for scenario in ["bear", "base", "bull"]:
-        result = calculate_dcf(ticker, growth_rate=growth_rates[scenario])
-        print(f"  {scenario.capitalize()}: ₹{result['intrinsic_value_per_share']:,.2f} per share")
+    base = run_dcf_math(inputs, growth_rates["base"], 0.12, 0.04)
+    print(f"{ticker} Base case: ₹{base['intrinsic_value_per_share']:,.2f} per share")
+    print("(expected: ₹1,918.23 -- same as before the refactor)")
+
+    wacc_values = [0.10, 0.11, 0.12, 0.13, 0.14]
+    tg_values = [0.03, 0.035, 0.04, 0.045, 0.05]
+    grid = build_sensitivity_grid(inputs, growth_rates["base"], wacc_values, tg_values)
+
+    print("\nSensitivity grid (rows = WACC, columns = terminal growth):")
+    print("        " + "  ".join(f"{g*100:>6.1f}%" for g in tg_values))
+    for wacc, row in zip(wacc_values, grid):
+        print(f"{wacc*100:>5.1f}%  " + "  ".join(f"{v:>7,.0f}" for v in row))

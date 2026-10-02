@@ -2,16 +2,26 @@ import streamlit as st
 import sys
 import os
 import math
+import pandas as pd
 import yfinance as yf
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from fundamentals import get_fundamentals, get_historical_growth_rates, calculate_dcf
+from fundamentals import (
+    get_fundamentals,
+    get_historical_growth_rates,
+    get_dcf_inputs,
+    run_dcf_math,
+    build_sensitivity_grid,
+)
+
+# Assumptions used for the Bear/Base/Bull cards
+WACC = 0.12
+TERMINAL_GROWTH = 0.04
+PROJECTION_YEARS = 5
 
 
 # ---------- Cached data loaders ----------
-# st.cache_data remembers a function's result for a while, so Streamlit
-# doesn't re-download the same data every time you touch the dropdown.
 
 @st.cache_data(ttl=3600)
 def load_fundamentals(ticker):
@@ -19,12 +29,13 @@ def load_fundamentals(ticker):
 
 
 @st.cache_data(ttl=3600)
-def load_valuation(ticker):
-    growth_rates = get_historical_growth_rates(ticker)
-    results = {}
-    for scenario in ["bear", "base", "bull"]:
-        results[scenario] = calculate_dcf(ticker, growth_rate=growth_rates[scenario])
-    return growth_rates, results
+def load_growth_rates(ticker):
+    return get_historical_growth_rates(ticker)
+
+
+@st.cache_data(ttl=3600)
+def load_dcf_inputs(ticker):
+    return get_dcf_inputs(ticker)
 
 
 @st.cache_data(ttl=300)
@@ -62,7 +73,15 @@ st.header(f"{selected_company} ({ticker})")
 
 fundamentals = load_fundamentals(ticker)
 current_price = load_current_price(ticker)
-growth_rates, dcf_results = load_valuation(ticker)
+growth_rates = load_growth_rates(ticker)
+dcf_inputs = load_dcf_inputs(ticker)
+
+dcf_results = {
+    scenario: run_dcf_math(
+        dcf_inputs, growth_rates[scenario], WACC, TERMINAL_GROWTH, PROJECTION_YEARS
+    )
+    for scenario in ["bear", "base", "bull"]
+}
 
 # ---------- Current price ----------
 
@@ -97,18 +116,63 @@ for col, scenario in zip(cols, ["bear", "base", "bull"]):
         delta_text = None
     col.metric(scenario.capitalize(), f"₹{fmt(value)}", delta_text)
 
-# ---------- Assumptions shown next to the valuation ----------
+# ---------- Assumptions ----------
 
 st.subheader("Assumptions behind these values")
 
-base = dcf_results["base"]
 st.write(
-    f"- **WACC:** {base['wacc'] * 100:.1f}%  (placeholder assumption, not derived from the company)\n"
-    f"- **Terminal growth:** {base['terminal_growth'] * 100:.1f}%\n"
-    f"- **Projection period:** 5 years\n"
+    f"- **WACC:** {WACC * 100:.1f}%  (placeholder assumption, not derived from the company)\n"
+    f"- **Terminal growth:** {TERMINAL_GROWTH * 100:.1f}%\n"
+    f"- **Projection period:** {PROJECTION_YEARS} years\n"
     f"- **Bear growth:** {growth_rates['bear'] * 100:.2f}%  (lowest valid historical revenue growth)\n"
     f"- **Base growth:** {growth_rates['base'] * 100:.2f}%  (middle historical revenue growth)\n"
     f"- **Bull growth:** {growth_rates['bull'] * 100:.2f}%  (highest historical revenue growth)"
+)
+
+# ---------- Sensitivity analysis ----------
+
+st.subheader("Sensitivity: WACC × Terminal Growth")
+
+scenario_choice = st.selectbox("Growth scenario", ["Bear", "Base", "Bull"], index=1)
+view = st.radio("Show", ["Value per share (₹)", "% vs market price"], horizontal=True)
+
+wacc_values = [0.10, 0.11, 0.12, 0.13, 0.14]
+tg_values = [0.03, 0.035, 0.04, 0.045, 0.05]
+
+grid = build_sensitivity_grid(
+    dcf_inputs,
+    growth_rates[scenario_choice.lower()],
+    wacc_values,
+    tg_values,
+    PROJECTION_YEARS,
+)
+
+rows = []
+for row in grid:
+    formatted_row = []
+    for value in row:
+        if value is None:
+            formatted_row.append("N/A")
+        elif view == "Value per share (₹)":
+            formatted_row.append(f"₹{value:,.0f}")
+        elif current_price:
+            formatted_row.append(f"{(value / current_price - 1) * 100:+.0f}%")
+        else:
+            formatted_row.append("N/A")
+    rows.append(formatted_row)
+
+df = pd.DataFrame(
+    rows,
+    index=[f"WACC {w * 100:.1f}%" for w in wacc_values],
+    columns=[f"TG {g * 100:.1f}%" for g in tg_values],
+)
+st.dataframe(df)
+
+st.caption(
+    "Each cell re-runs the full DCF with a different discount rate (WACC, rows) and "
+    "terminal growth rate (TG, columns). The centre cell (12.0% / 4.0%) equals the "
+    "value in the DCF cards above, which is a built-in consistency check. "
+    "Notice how far the values move: most of a DCF's value sits in the terminal value."
 )
 
 st.caption(
