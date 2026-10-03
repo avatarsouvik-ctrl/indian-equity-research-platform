@@ -98,15 +98,24 @@ def get_fundamentals(ticker_symbol):
     stockholders_equity = balance_sheet.loc["Stockholders Equity"].iloc[0]
     cash = balance_sheet.loc["Cash And Cash Equivalents"].iloc[0]
     ebitda = financials.loc["EBITDA"].iloc[0]
+    ebit = financials.loc["EBIT"].iloc[0]
+    total_assets = balance_sheet.loc["Total Assets"].iloc[0]
+    current_liabilities = balance_sheet.loc["Current Liabilities"].iloc[0]
 
     total_debt_inr = convert_to_inr(total_debt, actual_currency)
     cash_inr = convert_to_inr(cash, actual_currency)
     ebitda_inr = convert_to_inr(ebitda, actual_currency)
     stockholders_equity_inr = convert_to_inr(stockholders_equity, actual_currency)
+    ebit_inr = convert_to_inr(ebit, actual_currency)
+    total_assets_inr = convert_to_inr(total_assets, actual_currency)
+    current_liabilities_inr = convert_to_inr(current_liabilities, actual_currency)
 
     debt_to_equity = total_debt_inr / stockholders_equity_inr
     enterprise_value = market_cap + total_debt_inr - cash_inr
     ev_to_ebitda = enterprise_value / ebitda_inr
+
+    capital_employed = total_assets_inr - current_liabilities_inr
+    roce = ebit_inr / capital_employed
 
     return {
         "ticker": ticker_symbol,
@@ -115,6 +124,7 @@ def get_fundamentals(ticker_symbol):
         "net_income": financials.loc["Net Income"].iloc[0],
         "eps": financials.loc["Diluted EPS"].iloc[0],
         "roe": info.get("returnOnEquity"),
+        "roce": roce,
         "debt_to_equity": debt_to_equity,
         "pe_ratio": info.get("trailingPE"),
         "ev_to_ebitda": ev_to_ebitda,
@@ -246,20 +256,6 @@ def calculate_dcf(ticker_symbol, growth_rate, wacc=0.12, terminal_growth=0.04, p
 
 
 if __name__ == "__main__":
-    ticker = "TCS.NS"
-
-    inputs = get_dcf_inputs(ticker)
-    growth_rates = get_historical_growth_rates(ticker)
-
-    base = run_dcf_math(inputs, growth_rates["base"], 0.12, 0.04)
-    print(f"{ticker} Base case: ₹{base['intrinsic_value_per_share']:,.2f} per share")
-    print("(expected: ₹1,918.23 -- same as before the refactor)")
-
-    wacc_values = [0.10, 0.11, 0.12, 0.13, 0.14]
-    tg_values = [0.03, 0.035, 0.04, 0.045, 0.05]
-    grid = build_sensitivity_grid(inputs, growth_rates["base"], wacc_values, tg_values)
-
-    print("\nSensitivity grid (rows = WACC, columns = terminal growth):")
-    print("        " + "  ".join(f"{g*100:>6.1f}%" for g in tg_values))
-    for wacc, row in zip(wacc_values, grid):
-        print(f"{wacc*100:>5.1f}%  " + "  ".join(f"{v:>7,.0f}" for v in row))
+    for ticker in ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS"]:
+        data = get_fundamentals(ticker)
+        print(f"{data['ticker']}: ROCE = {data['roce']*100:.1f}%")

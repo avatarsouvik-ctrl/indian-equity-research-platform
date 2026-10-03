@@ -97,10 +97,11 @@ col1.metric("Revenue", fmt(fundamentals["revenue"], 0))
 col2.metric("EBITDA", fmt(fundamentals["ebitda"], 0))
 col3.metric("Net Income", fmt(fundamentals["net_income"], 0))
 
-col4, col5, col6 = st.columns(3)
+col4, col5, col6, col7 = st.columns(4)
 col4.metric("P/E Ratio", fmt(fundamentals["pe_ratio"]))
 col5.metric("Debt/Equity", fmt(fundamentals["debt_to_equity"], 3))
 col6.metric("EV/EBITDA", fmt(fundamentals["ev_to_ebitda"]))
+col7.metric("ROCE", f"{fmt(fundamentals['roce'] * 100, 1)}%")
 
 # ---------- DCF valuation ----------
 
