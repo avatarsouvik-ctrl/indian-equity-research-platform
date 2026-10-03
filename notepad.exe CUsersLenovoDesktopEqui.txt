@@ -1,1 +1,0 @@
-notepad.exe "C:\Users\Lenovo\Desktop\Equity Research Project\README.md"
