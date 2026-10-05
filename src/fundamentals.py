@@ -256,6 +256,7 @@ def calculate_dcf(ticker_symbol, growth_rate, wacc=0.12, terminal_growth=0.04, p
 
 
 if __name__ == "__main__":
-    for ticker in ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS"]:
-        data = get_fundamentals(ticker)
-        print(f"{data['ticker']}: ROCE = {data['roce']*100:.1f}%")
+    tickers = ["TCS.NS", "RELIANCE.NS", "ADANIENT.NS", "HDFCBANK.NS", "ZOMATO.NS"]
+    for ticker in tickers:
+        beta = yf.Ticker(ticker).info.get("beta")
+        print(f"{ticker}: beta = {beta}")
