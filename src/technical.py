@@ -39,8 +39,22 @@ def add_rsi(history, period=14):
     return history
 
 
+def add_macd(history, fast=12, slow=26, signal=9):
+    history = history.copy()
+
+    ema_fast = history["Close"].ewm(span=fast, adjust=False).mean()
+    ema_slow = history["Close"].ewm(span=slow, adjust=False).mean()
+
+    history["MACD"] = ema_fast - ema_slow
+    history["MACD_Signal"] = history["MACD"].ewm(span=signal, adjust=False).mean()
+    history["MACD_Histogram"] = history["MACD"] - history["MACD_Signal"]
+
+    return history
+
+
 if __name__ == "__main__":
     data = get_price_history("TCS.NS")
     data = add_moving_averages(data)
     data = add_rsi(data)
-    print(data[["Close", "RSI"]].tail(10))
+    data = add_macd(data)
+    print(data[["Close", "MACD", "MACD_Signal", "MACD_Histogram"]].tail(10))
