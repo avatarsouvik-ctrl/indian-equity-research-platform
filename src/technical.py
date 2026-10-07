@@ -23,7 +23,24 @@ def add_moving_averages(history):
     return history
 
 
+def add_rsi(history, period=14):
+    history = history.copy()
+    delta = history["Close"].diff()
+
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+
+    rs = avg_gain / avg_loss
+    history["RSI"] = 100 - (100 / (1 + rs))
+
+    return history
+
+
 if __name__ == "__main__":
     data = get_price_history("TCS.NS")
     data = add_moving_averages(data)
-    print(data[["Close", "MA20", "MA50", "MA200"]].tail(10))
+    data = add_rsi(data)
+    print(data[["Close", "RSI"]].tail(10))
