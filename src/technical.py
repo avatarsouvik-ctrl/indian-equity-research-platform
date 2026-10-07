@@ -53,8 +53,10 @@ def add_macd(history, fast=12, slow=26, signal=9):
 
 
 if __name__ == "__main__":
-    data = get_price_history("TCS.NS")
-    data = add_moving_averages(data)
-    data = add_rsi(data)
-    data = add_macd(data)
-    print(data[["Close", "MACD", "MACD_Signal", "MACD_Histogram"]].tail(10))
+    for ticker in ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS"]:
+        data = get_price_history(ticker)
+        data = add_moving_averages(data)
+        data = add_rsi(data)
+        data = add_macd(data)
+        latest = data.iloc[-1]
+        print(f"{ticker}: Close={latest['Close']:.2f}  MA20={latest['MA20']:.2f}  MA50={latest['MA50']:.2f}  MA200={latest['MA200']:.2f}  RSI={latest['RSI']:.2f}  MACD={latest['MACD']:.2f}  Signal={latest['MACD_Signal']:.2f}")
